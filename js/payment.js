@@ -1,19 +1,18 @@
-// payment-fixs.js - FIXED VERSION untuk struktur HTML Anda
+// payment.js - FIXED VERSION dengan Firebase integration
 import firebaseDB from './firebase-db.js';
 
 class PaymentSystem {
     constructor() {
         this.checkoutData = null;
         this.paymentTimer = null;
-        this.isAuthReady = false;
         this.currentUser = null;
-        this.isDOMReady = false;
+        this.authReady = false;
         
         this.init();
     }
 
     async init() {
-        console.log('💳 Initializing payment system untuk struktur HTML Anda');
+        console.log('💳 Initializing payment system');
         
         try {
             // Tunggu DOM ready
@@ -23,66 +22,86 @@ class PaymentSystem {
                 });
             }
 
-            this.isDOMReady = true;
-            console.log('💳 DOM ready, proceeding with initialization');
-
-            // Tunggu sebentar untuk memastikan semua element sudah ter-render
-            await new Promise(resolve => setTimeout(resolve, 500));
-
+            console.log('💳 DOM ready, waiting for auth system...');
+            
+            // TUNGGU AUTH SYSTEM SIAP
+            await this.waitForAuthSystem();
+            
             // Load dan render data
             this.loadCheckoutData();
             this.setupEventListeners();
             this.startPaymentTimer();
             
-            // Simpan ke Firebase jika user login
+            // Simpan ke Firebase JIKA user login
             if (this.isUserLoggedIn()) {
+                console.log('💳 User logged in, saving to Firebase...');
                 await this.saveCompleteOrderToFirebase();
+            } else {
+                console.log('💳 User not logged in, skip Firebase save');
             }
             
         } catch (error) {
             console.error('💳 Error during payment initialization:', error);
-            // Fallback: tetap load data tanpa auth
+            // Fallback tanpa auth
             this.loadCheckoutData();
             this.setupEventListeners();
             this.startPaymentTimer();
         }
     }
 
-    // ==================== AUTHENTICATION & FIREBASE ====================
-
     /**
-     * 🔐 Tunggu auth system siap
+     * 🔐 Tunggu auth system siap dengan timeout
      */
-    async waitForAuthSystem(maxWait = 5000) {
+    async waitForAuthSystem(maxWait = 10000) {
         return new Promise((resolve) => {
             const startTime = Date.now();
             
             const checkAuth = () => {
-                // Cek jika user sudah login dari localStorage/session
+                console.log('💳 Checking auth status...');
+                
+                // Cek multiple sources untuk user data
                 const userData = localStorage.getItem('currentUser');
                 if (userData) {
                     try {
                         this.currentUser = JSON.parse(userData);
                         console.log('💳 User found in localStorage:', this.currentUser);
+                        this.authReady = true;
                         resolve();
                         return;
                     } catch (e) {
-                        console.warn('💳 Error parsing user data from localStorage:', e);
+                        console.warn('💳 Error parsing user data:', e);
                     }
                 }
                 
                 // Cek auth system global
-                if (window.authSystem !== undefined && window.authSystem.currentUser) {
+                if (window.authSystem && window.authSystem.currentUser) {
                     this.currentUser = window.authSystem.currentUser;
                     console.log('💳 User from auth system:', this.currentUser);
+                    this.authReady = true;
                     resolve();
-                } else if (Date.now() - startTime > maxWait) {
+                    return;
+                }
+                
+                // Cek firebase auth langsung
+                if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+                    this.currentUser = window.firebaseAuth.currentUser;
+                    console.log('💳 User from Firebase auth:', this.currentUser);
+                    this.authReady = true;
+                    resolve();
+                    return;
+                }
+                
+                // Timeout check
+                if (Date.now() - startTime > maxWait) {
                     console.warn('💳 Auth system timeout, continuing without auth');
                     this.currentUser = null;
+                    this.authReady = true;
                     resolve();
-                } else {
-                    setTimeout(checkAuth, 100);
+                    return;
                 }
+                
+                // Continue polling
+                setTimeout(checkAuth, 500);
             };
             
             checkAuth();
@@ -93,13 +112,17 @@ class PaymentSystem {
      * 🔍 Cek apakah user login
      */
     isUserLoggedIn() {
-        return this.currentUser !== null && this.currentUser !== undefined;
+        const isLoggedIn = this.currentUser !== null && 
+                          this.currentUser !== undefined && 
+                          this.currentUser.uid;
+        console.log('💳 User logged in check:', isLoggedIn);
+        return isLoggedIn;
     }
 
     // ==================== INVOICE RENDERING ====================
 
     /**
-     * 📄 Load checkout data dari localStorage - SESUAI STRUKTUR HTML ANDA
+     * 📄 Load checkout data dari localStorage
      */
     loadCheckoutData() {
         try {
@@ -114,7 +137,7 @@ class PaymentSystem {
 
             console.log('💳 Raw checkout data:', checkoutData);
 
-            // Process data sesuai struktur HTML Anda
+            // Process data sesuai struktur HTML
             const processedData = {
                 ...checkoutData,
                 shippingInfo: checkoutData.shippingInfo || checkoutData.userInfo || {},
@@ -143,7 +166,7 @@ class PaymentSystem {
     }
 
     /**
-     * 🎨 Render invoice ke HTML - SESUAI STRUKTUR HTML ANDA
+     * 🎨 Render invoice ke HTML
      */
     renderInvoice() {
         if (!this.checkoutData) {
@@ -152,7 +175,7 @@ class PaymentSystem {
         }
 
         try {
-            console.log('💳 Starting invoice rendering dengan struktur HTML Anda');
+            console.log('💳 Starting invoice rendering');
             
             const { cart, discount, shippingInfo, orderId, expiryTime } = this.checkoutData;
             
@@ -168,7 +191,7 @@ class PaymentSystem {
 
             console.log('💳 Calculated totals:', { subtotal, discount, shipping, total });
 
-            // Set invoice data - SESUAI ID DI HTML ANDA
+            // Set invoice data
             this.setElementContent('invoice-order-id', orderId);
             this.setElementContent('invoice-date', new Date().toLocaleDateString('id-ID', {
                 weekday: 'long',
@@ -178,17 +201,17 @@ class PaymentSystem {
             }));
             this.setElementContent('order-date', new Date().toLocaleDateString('id-ID'));
 
-            // Customer info - SESUAI ID DI HTML ANDA
+            // Customer info
             this.setElementContent('customer-name', shippingInfo.recipientName || 'Tidak tersedia');
             this.setElementContent('customer-phone', shippingInfo.recipientPhone || 'Tidak tersedia');
             this.setElementContent('customer-address', shippingInfo.shippingAddress || 'Tidak tersedia');
             this.setElementContent('customer-city', 
                 `${shippingInfo.city || ''} ${shippingInfo.postalCode || ''}`.trim() || 'Tidak tersedia');
 
-            // Render products table - SESUAI ID DI HTML ANDA
+            // Render products table
             this.renderProductsTable(cart);
 
-            // Render totals - SESUAI ID DI HTML ANDA
+            // Render totals
             this.setElementContent('invoice-subtotal', `Rp${subtotal.toLocaleString('id-ID')}`);
             this.setElementContent('invoice-total', `Rp${total.toLocaleString('id-ID')}`);
             this.setElementContent('invoice-shipping', `Rp${shipping.toLocaleString('id-ID')}`);
@@ -203,7 +226,7 @@ class PaymentSystem {
                 }
             }
 
-            // Expiry time - SESUAI ID DI HTML ANDA
+            // Expiry time
             const expiryDate = new Date(expiryTime);
             const formattedExpiry = expiryDate.toLocaleDateString('id-ID', {
                 weekday: 'long',
@@ -226,7 +249,7 @@ class PaymentSystem {
     }
 
     /**
-     * 📊 Render products table - SESUAI STRUKTUR HTML ANDA
+     * 📊 Render products table
      */
     renderProductsTable(cart) {
         const tbody = document.getElementById('invoice-products-body');
@@ -259,7 +282,6 @@ class PaymentSystem {
         const element = document.getElementById(id);
         if (element) {
             element.textContent = text;
-            console.log(`✅ Set ${id}: ${text}`);
         } else {
             console.warn(`⚠️ Element ${id} not found`);
         }
@@ -428,6 +450,103 @@ class PaymentSystem {
         }, 5000);
     }
 
+    // ==================== FIREBASE INTEGRATION ====================
+
+    /**
+     * 💾 Simpan data lengkap ke Firebase dengan validasi
+     */
+    async saveCompleteOrderToFirebase() {
+        try {
+            // Validasi data sebelum save
+            if (!this.checkoutData) {
+                console.error('💳 No checkout data available');
+                return;
+            }
+
+            if (!this.isUserLoggedIn()) {
+                console.log('💳 User not logged in, skip Firebase save');
+                return;
+            }
+
+            if (!firebaseDB || typeof firebaseDB.saveOrder !== 'function') {
+                console.error('💳 Firebase DB not available');
+                return;
+            }
+
+            console.log('💳 Saving order to Firebase...');
+
+            // Validasi cart data
+            if (!this.checkoutData.cart || !Array.isArray(this.checkoutData.cart) || this.checkoutData.cart.length === 0) {
+                console.error('💳 Invalid cart data:', this.checkoutData.cart);
+                return;
+            }
+
+            // Prepare complete order data
+            const completeOrderData = {
+                // Order metadata
+                orderId: this.checkoutData.orderId || `INV-${Date.now()}`,
+                orderNumber: `ORDER-${this.checkoutData.orderId || Date.now()}`,
+                userId: this.currentUser.uid,
+                userEmail: this.currentUser.email || 'no-email',
+                userName: this.currentUser.displayName || 
+                         this.checkoutData.shippingInfo?.recipientName || 
+                         'Customer',
+                
+                // Recipient info
+                recipientInfo: {
+                    name: this.checkoutData.shippingInfo?.recipientName || 'Customer',
+                    phone: this.checkoutData.shippingInfo?.recipientPhone || '081234567890',
+                    address: this.checkoutData.shippingInfo?.shippingAddress || 'Alamat tidak tersedia',
+                    city: this.checkoutData.shippingInfo?.city || 'Kota',
+                    postalCode: this.checkoutData.shippingInfo?.postalCode || '12345',
+                    notes: this.checkoutData.shippingInfo?.orderNotes || 'Tidak ada catatan'
+                },
+                
+                // Cart items dengan validasi
+                items: this.checkoutData.cart.map((item, index) => ({
+                    itemId: index + 1,
+                    productId: item.id || `prod-${index}`,
+                    productName: item.name || 'Product',
+                    price: Number(item.price) || 0,
+                    quantity: Number(item.quantity) || 1,
+                    subtotal: (Number(item.price) || 0) * (Number(item.quantity) || 1),
+                    image: item.image || 'images/placeholder-product.jpg'
+                })),
+                
+                // Payment info
+                paymentInfo: {
+                    method: 'transfer_manual',
+                    bankName: 'Bank Nusantara',
+                    subtotal: this.getTotalAmount(),
+                    discount: this.checkoutData.discount || 0,
+                    shippingCost: 0,
+                    totalAmount: Math.max(0, this.getTotalAmount() - (this.checkoutData.discount || 0)),
+                    status: 'pending',
+                    expiryTime: this.checkoutData.expiryTime || this.getExpiryTime(),
+                    virtualAccount: '233110005'
+                },
+                
+                // Status dan timestamps
+                status: 'pending_payment',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+
+            console.log('💳 Order data prepared for Firebase:', completeOrderData);
+
+            // Save ke Firebase
+            await firebaseDB.saveOrder(completeOrderData);
+            console.log('💳 Order successfully saved to Firebase');
+
+            // Tampilkan konfirmasi
+            this.showMessage('Pesanan berhasil disimpan di database!', 'success');
+
+        } catch (error) {
+            console.error('💳 Error saving to Firebase:', error);
+            this.showMessage('Gagal menyimpan pesanan ke database: ' + error.message, 'error');
+        }
+    }
+
     // ==================== EVENT LISTENERS ====================
 
     /**
@@ -450,71 +569,6 @@ class PaymentSystem {
         const printBtn = document.getElementById('print-invoice');
         if (printBtn) {
             printBtn.addEventListener('click', () => window.print());
-        }
-    }
-
-    // ==================== FIREBASE INTEGRATION ====================
-
-    /**
-     * 💾 Simpan data lengkap ke Firebase
-     */
-    async saveCompleteOrderToFirebase() {
-        try {
-            if (!this.checkoutData || !this.isUserLoggedIn()) {
-                console.log('💳 Skip Firebase save - no data or user not logged in');
-                return;
-            }
-
-            console.log('💳 Saving order to Firebase');
-
-            const completeOrderData = {
-                orderId: this.checkoutData.orderId,
-                orderNumber: `ORDER-${this.checkoutData.orderId}`,
-                userId: this.currentUser.uid,
-                userEmail: this.currentUser.email,
-                userName: this.currentUser.displayName || this.checkoutData.shippingInfo.recipientName,
-                
-                recipientInfo: {
-                    name: this.checkoutData.shippingInfo.recipientName,
-                    phone: this.checkoutData.shippingInfo.recipientPhone,
-                    address: this.checkoutData.shippingInfo.shippingAddress,
-                    city: this.checkoutData.shippingInfo.city,
-                    postalCode: this.checkoutData.shippingInfo.postalCode,
-                    notes: this.checkoutData.shippingInfo.orderNotes || 'Tidak ada catatan'
-                },
-                
-                items: this.checkoutData.cart.map((item, index) => ({
-                    itemId: index + 1,
-                    productId: item.id || `prod-${index}`,
-                    productName: item.name || 'Product',
-                    price: Number(item.price) || 0,
-                    quantity: Number(item.quantity) || 1,
-                    subtotal: (Number(item.price) || 0) * (Number(item.quantity) || 1)
-                })),
-                
-                paymentInfo: {
-                    method: 'transfer_manual',
-                    bankName: 'Bank Nusantara',
-                    subtotal: this.getTotalAmount(),
-                    discount: this.checkoutData.discount || 0,
-                    shippingCost: 0,
-                    totalAmount: this.getTotalAmount() - (this.checkoutData.discount || 0),
-                    status: 'pending',
-                    expiryTime: this.checkoutData.expiryTime || this.getExpiryTime()
-                },
-                
-                status: 'pending_payment',
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString()
-            };
-
-            if (firebaseDB && typeof firebaseDB.saveOrder === 'function') {
-                await firebaseDB.saveOrder(completeOrderData);
-                console.log('💳 Order saved to Firebase');
-            }
-
-        } catch (error) {
-            console.error('💳 Error saving to Firebase:', error);
         }
     }
 
@@ -627,6 +681,19 @@ class PaymentSystem {
             container.innerHTML = '';
             container.appendChild(errorDiv);
         }
+    }
+
+    /**
+     * 🐛 Debug data flow
+     */
+    debugDataFlow() {
+        console.log('💳=== DEBUG DATA FLOW ===');
+        console.log('💳 Checkout data from localStorage:', this.checkoutData);
+        console.log('💳 Current user:', this.currentUser);
+        console.log('💳 Firebase DB available:', !!firebaseDB);
+        console.log('💳 Cart items:', this.checkoutData?.cart);
+        console.log('💳 User logged in:', this.isUserLoggedIn());
+        console.log('💳========================');
     }
 }
 
